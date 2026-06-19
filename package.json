@@ -1,0 +1,26 @@
+{
+  "name": "devrt",
+  "version": "0.1.0",
+  "description": "Agent-native project runtime CLI for task, action, verify, and replay workflows.",
+  "type": "module",
+  "bin": {
+    "devrt": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PROJECT_BRIEF.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
