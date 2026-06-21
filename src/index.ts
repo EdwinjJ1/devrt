@@ -127,6 +127,8 @@ const DEVRT_DIR = ".devrt";
 const TASKS_DIR = "tasks";
 const TRACES_DIR = "traces";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const AGENT_BLOCK_START = "<!-- devrt:agent-instructions:start -->";
+const AGENT_BLOCK_END = "<!-- devrt:agent-instructions:end -->";
 
 export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
   const ctx = {
@@ -147,8 +149,24 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
     }
 
     if (command === "init") {
-      writeJson(ctx.stdout, await initWorkspace(ctx.cwd));
+      writeJson(ctx.stdout, await initWorkspace(ctx.cwd, parsed));
       return 0;
+    }
+
+    if (command === "agent") {
+      if (subcommand === "install") {
+        writeJson(ctx.stdout, await installAgentFiles(ctx.cwd));
+        return 0;
+      }
+      if (subcommand === "instructions") {
+        writeJson(ctx.stdout, {
+          ok: true,
+          format: "markdown",
+          content: defaultInstructions()
+        });
+        return 0;
+      }
+      throw usageError("Expected `devrt agent install` or `devrt agent instructions`.");
     }
 
     if (command === "task") {
@@ -261,7 +279,7 @@ function parseArgs(args: string[]): ParsedArgs {
   return { positionals, flags };
 }
 
-async function initWorkspace(cwd: string): Promise<JsonObject> {
+async function initWorkspace(cwd: string, parsed: ParsedArgs = { positionals: [], flags: new Map() }): Promise<JsonObject> {
   const devrtPath = path.join(cwd, DEVRT_DIR);
   const created: string[] = [];
   const preserved: string[] = [];
@@ -301,13 +319,74 @@ async function initWorkspace(cwd: string): Promise<JsonObject> {
 
   await writeIfMissing(path.join(devrtPath, "instructions.md"), defaultInstructions(), cwd, created, preserved);
 
+  const agentInstall = parsed.flags.has("agent") ? await installAgentFiles(cwd) : undefined;
+
   return {
     ok: true,
     workspace: displayPath(cwd, devrtPath),
     created,
     preserved,
-    nextSuggestedCommands: ["devrt task create --from <file>", "devrt actions validate"]
+    agentInstall: agentInstall ?? null,
+    nextSuggestedCommands: parsed.flags.has("agent")
+      ? ["devrt task create --from <file>", "devrt doctor", "devrt verify --task <taskId>"]
+      : ["devrt task create --from <file>", "devrt actions validate", "devrt agent install"]
   };
+}
+
+async function installAgentFiles(cwd: string): Promise<JsonObject> {
+  if (!existsSync(path.join(cwd, DEVRT_DIR))) {
+    await initWorkspace(cwd);
+  }
+
+  const installed: string[] = [];
+  const updated: string[] = [];
+  const devrtInstructions = path.join(cwd, DEVRT_DIR, "instructions.md");
+  await writeFile(devrtInstructions, defaultInstructions(), "utf8");
+  updated.push(displayPath(cwd, devrtInstructions));
+
+  for (const fileName of ["AGENTS.md", "CLAUDE.md"]) {
+    const filePath = path.join(cwd, fileName);
+    const action = await upsertManagedBlock(filePath, projectAgentBlock(fileName));
+    if (action === "created") {
+      installed.push(displayPath(cwd, filePath));
+    } else {
+      updated.push(displayPath(cwd, filePath));
+    }
+  }
+
+  return {
+    ok: true,
+    installed,
+    updated,
+    entrypoints: [
+      ".devrt/instructions.md",
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    nextSuggestedCommands: ["devrt doctor", "devrt task create --from <file>", "devrt verify --task <taskId>"]
+  };
+}
+
+async function upsertManagedBlock(filePath: string, blockContent: string): Promise<"created" | "updated"> {
+  const block = `${AGENT_BLOCK_START}\n${blockContent.trim()}\n${AGENT_BLOCK_END}\n`;
+  if (!existsSync(filePath)) {
+    await writeFile(filePath, `${block}\n`, "utf8");
+    return "created";
+  }
+
+  const existing = await readFile(filePath, "utf8");
+  const start = existing.indexOf(AGENT_BLOCK_START);
+  const end = existing.indexOf(AGENT_BLOCK_END);
+  if (start >= 0 && end >= start) {
+    const afterEnd = end + AGENT_BLOCK_END.length;
+    const next = `${existing.slice(0, start)}${block}${existing.slice(afterEnd).replace(/^\n?/, "")}`;
+    await writeFile(filePath, next, "utf8");
+    return "updated";
+  }
+
+  const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+  await writeFile(filePath, `${existing}${separator}${block}\n`, "utf8");
+  return "updated";
 }
 
 async function writeIfMissing(
@@ -1756,6 +1835,9 @@ function helpResult(): JsonObject {
     name: "devrt",
     commands: [
       "devrt init",
+      "devrt init --agent",
+      "devrt agent install",
+      "devrt agent instructions",
       "devrt task create --from <file|-> [--id <taskId>]",
       "devrt task show <taskId>",
       "devrt actions list",
@@ -1774,16 +1856,46 @@ function helpResult(): JsonObject {
 function defaultInstructions(): string {
   return `# devrt Agent Instructions
 
-- Read the task with \`devrt task show <taskId>\` before changing code.
-- Treat \`.devrt/tasks/<taskId>/task.md\` as the user's original request. Do not rewrite it.
-- Put any derived acceptance criteria in \`.devrt/tasks/<taskId>/acceptance.json\`.
-- Only call actions listed by \`devrt actions list\`.
-- Before adding new wrappers, run \`devrt doctor\` and inspect existing project CLI/tools/actions for reuse.
-- Prefer a real workflow scenario over a generic typecheck: create resource, pass ids forward, wait/read result, and cleanup when possible.
-- After code changes, run \`devrt verify --task <taskId>\` or \`devrt verify scenario <name> --task <taskId>\`.
-- Continue fixing while status is \`needs_action\` or \`needs_fix\`.
-- Stop only when \`devrt status --task <taskId>\` returns \`verified\`.
+This project uses devrt as an agent-native development runtime. Use it whenever a task changes or validates a real product workflow.
+
+Core loop:
+
+1. Preserve the user's original request with \`devrt task create --from <file|->\`. Do not rewrite \`.devrt/tasks/<taskId>/task.md\`.
+2. Run \`devrt doctor\` before adding wrappers. Reuse existing project CLIs, scripts, API routes, or service entrypoints first.
+3. If the existing surface is not enough, update \`.devrt/manifest.json\` with real actions. Actions must point to real commands/source and return stable JSON.
+4. Maintain scenarios for changed workflows. A good scenario creates resources, passes ids forward, triggers the business action, waits/reads results, asserts outcomes, and cleans up when practical.
+5. Do not treat typecheck/build as sufficient proof. Prefer \`devrt verify --task <taskId>\` backed by workflow scenarios.
+6. Continue fixing while \`devrt status --task <taskId>\` is \`needs_action\`, \`needs_fix\`, or \`blocked\`.
+7. Stop only when \`devrt status --task <taskId>\` returns \`verified\`.
+
+Useful commands:
+
+\`\`\`bash
+devrt doctor
+devrt actions list
+devrt scenarios list
+devrt run <action> --task <taskId> --json '{...}'
+devrt verify --task <taskId>
+devrt status --task <taskId>
+devrt replay last --task <taskId>
+\`\`\`
 `;
+}
+
+function projectAgentBlock(fileName: string): string {
+  return `## devrt Agent Runtime
+
+Read \`.devrt/instructions.md\` before implementing or verifying product changes.
+
+When this project has a user-facing workflow change, use devrt as the verification loop:
+
+- Create or inspect a devrt task that preserves the user's original request.
+- Run \`devrt doctor\` and reuse existing project CLI/API/script capabilities before adding new wrappers.
+- Keep \`.devrt/manifest.json\` actions and scenarios aligned with the workflow you change.
+- Verify with \`devrt verify --task <taskId>\`; do not rely only on typecheck/build for completion.
+- Continue until \`devrt status --task <taskId>\` returns \`verified\`.
+
+This block is managed by \`devrt agent install\` for ${fileName}.`;
 }
 
 function displayPath(cwd: string, absolutePath: string): string {

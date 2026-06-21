@@ -15,6 +15,9 @@ It is not meant to replace a product's own CLI. A serious project can expose its
 
 ```bash
 devrt init
+devrt init --agent
+devrt agent install
+devrt agent instructions
 devrt task create --from <file|->
 devrt task show <taskId>
 devrt doctor
@@ -27,6 +30,30 @@ devrt verify scenario <name> --task <taskId>
 devrt status --task <taskId>
 devrt replay last --task <taskId>
 ```
+
+## Agent Entry
+
+For the lowest-friction setup in another project, run:
+
+```bash
+devrt init --agent
+```
+
+This creates the normal `.devrt/` workspace and installs project-level agent entrypoints:
+
+- `.devrt/instructions.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+
+Existing `AGENTS.md` and `CLAUDE.md` content is preserved. devrt only inserts or updates its own managed block, so project-specific rules can live alongside it.
+
+If `.devrt/` already exists, refresh the agent entrypoints with:
+
+```bash
+devrt agent install
+```
+
+Agents should then treat `.devrt/instructions.md` as the local operating guide: preserve the user's original task, run `devrt doctor`, reuse existing project CLI/API/script capabilities, maintain actions/scenarios for changed workflows, and verify with `devrt verify --task <taskId>` before stopping.
 
 ## Manifest Shape
 

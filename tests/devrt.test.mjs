@@ -52,6 +52,41 @@ test("init creates a devrt workspace without overwriting existing files", async 
   assert.ok(second.stdout.json().preserved.includes(".devrt/manifest.json"));
 });
 
+test("init --agent installs project-level agent instruction entrypoints", async () => {
+  const cwd = await tempProject();
+  const result = await invoke(cwd, ["init", "--agent"]);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.json().ok, true);
+
+  const devrtInstructions = await readFile(path.join(cwd, ".devrt", "instructions.md"), "utf8");
+  const agents = await readFile(path.join(cwd, "AGENTS.md"), "utf8");
+  const claude = await readFile(path.join(cwd, "CLAUDE.md"), "utf8");
+
+  assert.match(devrtInstructions, /This project uses devrt as an agent-native development runtime/);
+  assert.match(agents, /<!-- devrt:agent-instructions:start -->/);
+  assert.match(agents, /devrt verify --task <taskId>/);
+  assert.match(claude, /Read `.devrt\/instructions.md`/);
+});
+
+test("agent install updates only the managed instruction block", async () => {
+  const cwd = await tempProject();
+  await writeFile(path.join(cwd, "AGENTS.md"), "# Project Rules\n\nKeep this custom rule.\n");
+
+  const result = await invoke(cwd, ["agent", "install"]);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.json().ok, true);
+
+  const first = await readFile(path.join(cwd, "AGENTS.md"), "utf8");
+  assert.match(first, /Keep this custom rule/);
+  assert.equal((first.match(/devrt:agent-instructions:start/g) ?? []).length, 1);
+
+  const secondRun = await invoke(cwd, ["agent", "install"]);
+  assert.equal(secondRun.exitCode, 0);
+  const second = await readFile(path.join(cwd, "AGENTS.md"), "utf8");
+  assert.match(second, /Keep this custom rule/);
+  assert.equal((second.match(/devrt:agent-instructions:start/g) ?? []).length, 1);
+});
+
 test("task create preserves original user wording verbatim", async () => {
   const cwd = await tempProject();
   await invoke(cwd, ["init"]);
