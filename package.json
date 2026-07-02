@@ -3,16 +3,41 @@
   "version": "0.1.0",
   "description": "Agent-native project runtime CLI for task, action, verify, and replay workflows.",
   "type": "module",
+  "license": "MIT",
+  "author": "Edwin (https://github.com/EdwinjJ1)",
+  "homepage": "https://github.com/EdwinjJ1/devrt#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EdwinjJ1/devrt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EdwinjJ1/devrt/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "agent-runtime",
+    "verification",
+    "cli",
+    "developer-tools",
+    "workflow",
+    "replay"
+  ],
   "bin": {
     "devrt": "./dist/cli.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md",
-    "PROJECT_BRIEF.md"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
