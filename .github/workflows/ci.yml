@@ -24,18 +24,39 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  install-script:
-    name: install.sh smoke test
+  install-from-tarball:
+    name: npm pack + global install smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install from local checkout
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Packs exactly what would ship to the npm registry (respects "files"
+      # in package.json) and installs it with --omit=dev, the same as a real
+      # user's `npm install -g devrt` / `npm install -g github:...`. This is
+      # the check that catches "works locally, breaks on a clean install"
+      # bugs like a missing prebuilt dist/ or a build step needing devDeps.
+      - run: npm pack --pack-destination /tmp
+      - run: npm install -g --omit=dev /tmp/devrt-*.tgz
+      - run: devrt help
+      - name: Exercise init --agent + task create end to end
         run: |
-          npm install -g .
-          devrt help
           mkdir -p /tmp/devrt-smoke && cd /tmp/devrt-smoke
           devrt init --agent
           echo "smoke task" | devrt task create --from -
+
+  install-script:
+    name: install.sh smoke test
+    runs-on: ubuntu-latest
+    needs: install-from-tarball
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash install.sh
+      - run: devrt help
